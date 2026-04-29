@@ -115,12 +115,12 @@
     font-size: 11px; color: var(--muted);
     text-transform: uppercase; letter-spacing: 0.05em;
   }
-  .field input[type="text"], .field input[type="number"] {
+  .field input[type="text"], .field input[type="number"], .field select {
     background: var(--bg); color: var(--text);
     border: 1px solid var(--border); border-radius: 6px;
     padding: 6px 8px; font-size: 13px; font-family: inherit;
   }
-  .field input:focus { outline: none; border-color: var(--accent); }
+  .field input:focus, .field select:focus { outline: none; border-color: var(--accent); }
   .field .hint { font-size: 11px; color: var(--muted); }
   .field.checkbox { flex-direction: row; align-items: center; gap: 8px; }
   .field.checkbox label { text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--text); }
@@ -216,7 +216,8 @@
         </div>
         <div class="field">
           <label for="cfg_host">Host <span style="color:var(--warn)">(restart required)</span></label>
-          <input type="text" id="cfg_host" name="host" />
+          <select id="cfg_host" name="host"></select>
+          <span class="hint">0.0.0.0 binds all interfaces; pick a specific IP to limit access.</span>
         </div>
         <div class="field">
           <label for="cfg_port">Port <span style="color:var(--warn)">(restart required)</span></label>
@@ -370,7 +371,17 @@ async function loadConfig() {
     document.getElementById("cfg_poll").value = c.poll_interval_seconds;
     document.getElementById("cfg_discharge").value = (c.discharge_thresholds || []).join(", ");
     document.getElementById("cfg_charge").value = (c.charge_thresholds || []).join(", ");
-    document.getElementById("cfg_host").value = c.host || "";
+    const hostSel = document.getElementById("cfg_host");
+    const candidates = Array.isArray(d.bind_candidates) ? d.bind_candidates.slice() : [];
+    if (c.host && !candidates.includes(c.host)) candidates.push(c.host);
+    hostSel.innerHTML = "";
+    for (const h of candidates) {
+      const opt = document.createElement("option");
+      opt.value = h;
+      opt.textContent = h;
+      hostSel.appendChild(opt);
+    }
+    hostSel.value = c.host || "";
     document.getElementById("cfg_port").value = c.port;
     document.getElementById("cfg_alert_startup").checked = !!c.alert_on_startup;
   } catch (e) {

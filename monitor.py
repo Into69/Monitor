@@ -247,6 +247,31 @@ def get_battery():
     }
 
 
+def get_bind_candidates() -> list[str]:
+    """Hosts the user can sensibly bind the server to: 0.0.0.0, localhost, plus IPv4
+    addresses of currently-up interfaces (loopback excluded since 'localhost' covers it)."""
+    candidates = ["0.0.0.0", "localhost"]
+    seen = set(candidates)
+    try:
+        stats = psutil.net_if_stats()
+        for iface, addrs in psutil.net_if_addrs().items():
+            iface_stats = stats.get(iface)
+            if iface_stats is not None and not iface_stats.isup:
+                continue
+            for addr in addrs:
+                if addr.family != socket.AF_INET:
+                    continue
+                ip = addr.address
+                if not ip or ip.startswith("127.") or ip == "0.0.0.0":
+                    continue
+                if ip not in seen:
+                    candidates.append(ip)
+                    seen.add(ip)
+    except Exception as e:
+        print(f"[net] failed to enumerate interfaces: {e}")
+    return candidates
+
+
 def get_system_stats():
     vm = psutil.virtual_memory()
     sm = psutil.swap_memory()
@@ -454,6 +479,7 @@ async def api_get_config():
         "defaults": DEFAULTS,
         "restart_required_keys": sorted(RESTART_REQUIRED_KEYS),
         "config_path": str(CONFIG_PATH),
+        "bind_candidates": get_bind_candidates(),
     }
 
 
