@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Battery & System Monitor</title>
+<style>
+  :root {
+    --bg: #0e1117;
+    --panel: #161b22;
+    --panel-2: #1f2630;
+    --border: #2a313c;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --good: #3fb950;
+    --warn: #d29922;
+    --bad: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 20px;
+  }
+  header h1 { margin: 0; font-size: 20px; font-weight: 600; }
+  header .meta { color: var(--muted); font-size: 12px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .card h2 {
+    margin: 0 0 12px;
+    font-size: 13px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+  }
+  .battery-percent {
+    font-size: 48px; font-weight: 700; line-height: 1;
+  }
+  .battery-status {
+    margin-top: 6px; color: var(--muted); font-size: 13px;
+  }
+  .bar {
+    margin-top: 14px;
+    height: 10px; border-radius: 999px;
+    background: var(--panel-2);
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .bar > span {
+    display: block; height: 100%;
+    background: var(--good);
+    transition: width 0.4s ease;
+  }
+  .row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; }
+  .row + .row { border-top: 1px solid var(--border); }
+  .row .k { color: var(--muted); }
+  .row .v { font-variant-numeric: tabular-nums; }
+  .pill {
+    display: inline-block; padding: 2px 8px; border-radius: 999px;
+    font-size: 11px; font-weight: 600;
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--muted);
+  }
+  .pill.ok { color: var(--good); border-color: rgba(63,185,80,0.4); }
+  .pill.warn { color: var(--warn); border-color: rgba(210,153,34,0.4); }
+  .pill.bad { color: var(--bad); border-color: rgba(248,81,73,0.4); }
+  .events { max-height: 320px; overflow: auto; }
+  .event {
+    padding: 8px 0; border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .event:last-child { border-bottom: none; }
+  .event .kind {
+    display: inline-block; min-width: 70px; font-size: 11px;
+    padding: 1px 6px; border-radius: 4px; margin-right: 8px;
+    background: var(--panel-2); color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .event.kind-low .kind { color: var(--bad); }
+  .event.kind-unplugged .kind { color: var(--warn); }
+  .event.kind-plugged .kind, .event.kind-charge .kind, .event.kind-full .kind { color: var(--good); }
+  .event .ts { color: var(--muted); font-size: 11px; margin-left: 6px; }
+  button {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 12px; font-size: 12px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button.primary { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+  .settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+  }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label {
+    font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .field input[type="text"], .field input[type="number"] {
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 8px; font-size: 13px; font-family: inherit;
+  }
+  .field input:focus { outline: none; border-color: var(--accent); }
+  .field .hint { font-size: 11px; color: var(--muted); }
+  .field.checkbox { flex-direction: row; align-items: center; gap: 8px; }
+  .field.checkbox label { text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--text); }
+  .settings-actions {
+    margin-top: 12px; display: flex; gap: 8px; align-items: center;
+  }
+  .settings-actions .status { font-size: 12px; color: var(--muted); margin-left: auto; }
+  .settings-actions .status.ok { color: var(--good); }
+  .settings-actions .status.err { color: var(--bad); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Battery &amp; System Monitor</h1>
+    <div class="meta" id="meta">loading…</div>
+  </div>
+  <div>
+    <button id="testBtn" title="Send a test message to the configured Discord webhook">Test webhook</button>
+  </div>
+</header>
+
+<div class="grid">
+  <div class="card">
+    <h2>Battery</h2>
+    <div class="battery-percent" id="battPct">—</div>
+    <div class="battery-status">
+      <span class="pill" id="battPlug">unknown</span>
+      <span id="battTime" style="margin-left:8px; color: var(--muted);"></span>
+    </div>
+    <div class="bar"><span id="battBar" style="width:0%"></span></div>
+  </div>
+
+  <div class="card">
+    <h2>CPU</h2>
+    <div class="row"><span class="k">Usage</span><span class="v" id="cpuPct">—</span></div>
+    <div class="row"><span class="k">Cores</span><span class="v" id="cpuCount">—</span></div>
+    <div class="row"><span class="k">Frequency</span><span class="v" id="cpuFreq">—</span></div>
+    <div class="row"><span class="k">Load avg</span><span class="v" id="loadAvg">—</span></div>
+  </div>
+
+  <div class="card">
+    <h2>Memory</h2>
+    <div class="row"><span class="k">Used</span><span class="v" id="memUsed">—</span></div>
+    <div class="row"><span class="k">Available</span><span class="v" id="memAvail">—</span></div>
+    <div class="row"><span class="k">Total</span><span class="v" id="memTotal">—</span></div>
+    <div class="bar"><span id="memBar" style="width:0%"></span></div>
+  </div>
+
+  <div class="card">
+    <h2>Disk</h2>
+    <div class="row"><span class="k">Path</span><span class="v" id="diskPath">—</span></div>
+    <div class="row"><span class="k">Used</span><span class="v" id="diskUsed">—</span></div>
+    <div class="row"><span class="k">Free</span><span class="v" id="diskFree">—</span></div>
+    <div class="bar"><span id="diskBar" style="width:0%"></span></div>
+  </div>
+
+  <div class="card">
+    <h2>System</h2>
+    <div class="row"><span class="k">Host</span><span class="v" id="sysHost">—</span></div>
+    <div class="row"><span class="k">Platform</span><span class="v" id="sysPlat">—</span></div>
+    <div class="row"><span class="k">Python</span><span class="v" id="sysPy">—</span></div>
+    <div class="row"><span class="k">Uptime</span><span class="v" id="sysUp">—</span></div>
+    <div class="row"><span class="k">App uptime</span><span class="v" id="appUp">—</span></div>
+  </div>
+
+  <div class="card" style="grid-column: 1 / -1;">
+    <h2>Settings</h2>
+    <form id="settingsForm" autocomplete="off">
+      <div class="settings-grid">
+        <div class="field" style="grid-column: 1 / -1;">
+          <label for="cfg_webhook">Discord webhook URL</label>
+          <input type="text" id="cfg_webhook" name="discord_webhook_url" placeholder="https://discord.com/api/webhooks/..." />
+          <span class="hint">Leave blank to disable Discord posts.</span>
+        </div>
+        <div class="field">
+          <label for="cfg_username">Webhook username</label>
+          <input type="text" id="cfg_username" name="username" maxlength="80" />
+        </div>
+        <div class="field">
+          <label for="cfg_poll">Poll interval (seconds)</label>
+          <input type="number" id="cfg_poll" name="poll_interval_seconds" min="5" max="3600" />
+        </div>
+        <div class="field">
+          <label for="cfg_discharge">Discharge thresholds (%)</label>
+          <input type="text" id="cfg_discharge" name="discharge_thresholds" placeholder="50, 30, 20, 10, 5" />
+          <span class="hint">Comma-separated, alerts when battery drops to/below.</span>
+        </div>
+        <div class="field">
+          <label for="cfg_charge">Charge thresholds (%)</label>
+          <input type="text" id="cfg_charge" name="charge_thresholds" placeholder="80, 100" />
+          <span class="hint">Comma-separated, alerts while plugged in.</span>
+        </div>
+        <div class="field">
+          <label for="cfg_host">Host <span style="color:var(--warn)">(restart required)</span></label>
+          <input type="text" id="cfg_host" name="host" />
+        </div>
+        <div class="field">
+          <label for="cfg_port">Port <span style="color:var(--warn)">(restart required)</span></label>
+          <input type="number" id="cfg_port" name="port" min="1" max="65535" />
+        </div>
+        <div class="field checkbox">
+          <input type="checkbox" id="cfg_alert_startup" name="alert_on_startup" />
+          <label for="cfg_alert_startup">Send Discord alert on monitor startup</label>
+        </div>
+      </div>
+      <div class="settings-actions">
+        <button type="submit" class="primary" id="saveBtn">Save</button>
+        <button type="button" id="resetBtn">Reset to defaults</button>
+        <span class="status" id="cfgStatus"></span>
+      </div>
+    </form>
+  </div>
+
+  <div class="card" style="grid-column: 1 / -1;">
+    <h2>Recent battery events</h2>
+    <div class="events" id="events"><div class="empty">No events yet.</div></div>
+  </div>
+</div>
+
+<script>
+function fmtBytes(n) {
+  if (n == null) return "—";
+  const u = ["B","KB","MB","GB","TB"];
+  let i = 0; let v = n;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return v.toFixed(v >= 10 || i === 0 ? 0 : 1) + " " + u[i];
+}
+function fmtDuration(s) {
+  if (s == null) return "—";
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${sec}s`;
+  return `${sec}s`;
+}
+function fmtTime(iso) {
+  if (!iso) return "";
+  try { return new Date(iso).toLocaleTimeString(); } catch { return iso; }
+}
+
+async function tick() {
+  try {
+    const r = await fetch("/api/stats", { cache: "no-store" });
+    const d = await r.json();
+
+    const b = d.battery;
+    if (b) {
+      document.getElementById("battPct").textContent = b.percent + "%";
+      const plug = document.getElementById("battPlug");
+      plug.textContent = b.plugged ? "Plugged in" : "On battery";
+      plug.className = "pill " + (b.plugged ? "ok" : (b.percent <= 20 ? "bad" : "warn"));
+      document.getElementById("battTime").textContent = b.time_left ? `~${b.time_left}` : "";
+      const bar = document.getElementById("battBar");
+      bar.style.width = b.percent + "%";
+      bar.style.background = b.plugged ? "var(--good)" : (b.percent <= 20 ? "var(--bad)" : (b.percent <= 50 ? "var(--warn)" : "var(--good)"));
+    } else {
+      document.getElementById("battPct").textContent = "n/a";
+      document.getElementById("battPlug").textContent = "no battery";
+      document.getElementById("battTime").textContent = "";
+    }
+
+    const s = d.system;
+    document.getElementById("cpuPct").textContent = s.cpu_percent.toFixed(1) + "%";
+    document.getElementById("cpuCount").textContent = s.cpu_count;
+    document.getElementById("cpuFreq").textContent = s.cpu_freq_mhz ? s.cpu_freq_mhz + " MHz" : "—";
+    document.getElementById("loadAvg").textContent = s.load_avg ? s.load_avg.map(x => x.toFixed(2)).join(" / ") : "—";
+
+    document.getElementById("memUsed").textContent = `${fmtBytes(s.memory.used)} (${s.memory.percent}%)`;
+    document.getElementById("memAvail").textContent = fmtBytes(s.memory.available);
+    document.getElementById("memTotal").textContent = fmtBytes(s.memory.total);
+    document.getElementById("memBar").style.width = s.memory.percent + "%";
+
+    document.getElementById("diskPath").textContent = s.disk.path;
+    document.getElementById("diskUsed").textContent = `${fmtBytes(s.disk.used)} (${s.disk.percent}%)`;
+    document.getElementById("diskFree").textContent = fmtBytes(s.disk.free);
+    document.getElementById("diskBar").style.width = s.disk.percent + "%";
+
+    document.getElementById("sysHost").textContent = s.host;
+    document.getElementById("sysPlat").textContent = s.platform;
+    document.getElementById("sysPy").textContent = s.python;
+    document.getElementById("sysUp").textContent = fmtDuration(s.uptime_seconds);
+    document.getElementById("appUp").textContent = fmtDuration(s.app_uptime_seconds);
+
+    document.getElementById("meta").textContent =
+      `Webhook ${d.webhook_configured ? "configured" : "NOT configured"} · poll every ${d.poll_interval_seconds}s · updated ${fmtTime(s.now)}`;
+
+    const ev = d.events || [];
+    const root = document.getElementById("events");
+    if (ev.length === 0) {
+      root.innerHTML = '<div class="empty">No events yet.</div>';
+    } else {
+      root.innerHTML = ev.map(e => `
+        <div class="event kind-${e.kind}">
+          <span class="kind">${e.kind}</span>
+          <span>${e.message}</span>
+          <span class="ts">${fmtTime(e.ts)}</span>
+        </div>`).join("");
+    }
+  } catch (e) {
+    document.getElementById("meta").textContent = "fetch error: " + e;
+  }
+}
+
+function setStatus(msg, kind) {
+  const s = document.getElementById("cfgStatus");
+  s.textContent = msg || "";
+  s.className = "status" + (kind ? " " + kind : "");
+}
+
+function parseThresholds(str) {
+  if (!str) return [];
+  return str.split(",").map(s => s.trim()).filter(Boolean).map(s => {
+    const n = Number(s);
+    if (!Number.isFinite(n)) throw new Error(`"${s}" is not a number`);
+    return Math.round(n);
+  });
+}
+
+async function loadConfig() {
+  try {
+    const r = await fetch("/api/config", { cache: "no-store" });
+    const d = await r.json();
+    const c = d.config;
+    document.getElementById("cfg_webhook").value = c.discord_webhook_url || "";
+    document.getElementById("cfg_username").value = c.username || "";
+    document.getElementById("cfg_poll").value = c.poll_interval_seconds;
+    document.getElementById("cfg_discharge").value = (c.discharge_thresholds || []).join(", ");
+    document.getElementById("cfg_charge").value = (c.charge_thresholds || []).join(", ");
+    document.getElementById("cfg_host").value = c.host || "";
+    document.getElementById("cfg_port").value = c.port;
+    document.getElementById("cfg_alert_startup").checked = !!c.alert_on_startup;
+  } catch (e) {
+    setStatus("Failed to load config: " + e, "err");
+  }
+}
+
+document.getElementById("settingsForm").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const btn = document.getElementById("saveBtn");
+  btn.disabled = true;
+  setStatus("Saving…");
+  let payload;
+  try {
+    payload = {
+      discord_webhook_url: document.getElementById("cfg_webhook").value.trim(),
+      username: document.getElementById("cfg_username").value.trim(),
+      poll_interval_seconds: Number(document.getElementById("cfg_poll").value),
+      discharge_thresholds: parseThresholds(document.getElementById("cfg_discharge").value),
+      charge_thresholds: parseThresholds(document.getElementById("cfg_charge").value),
+      host: document.getElementById("cfg_host").value.trim(),
+      port: Number(document.getElementById("cfg_port").value),
+      alert_on_startup: document.getElementById("cfg_alert_startup").checked,
+    };
+  } catch (e) {
+    setStatus("Invalid input: " + e.message, "err");
+    btn.disabled = false;
+    return;
+  }
+  try {
+    const r = await fetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if (!d.ok) {
+      setStatus("Error: " + (d.error || "save failed"), "err");
+    } else if (d.restart_required) {
+      setStatus(`Saved · restart required for: ${d.restart_required_keys_changed.join(", ")}`, "ok");
+    } else {
+      setStatus("Saved ✓", "ok");
+    }
+    await loadConfig();
+    tick();
+  } catch (e) {
+    setStatus("Save failed: " + e, "err");
+  }
+  btn.disabled = false;
+});
+
+document.getElementById("resetBtn").addEventListener("click", async () => {
+  if (!confirm("Reset all settings to defaults? This will clear the webhook URL.")) return;
+  setStatus("Resetting…");
+  try {
+    const r = await fetch("/api/config/reset", { method: "POST" });
+    const d = await r.json();
+    if (d.ok) {
+      setStatus("Reset to defaults ✓", "ok");
+      await loadConfig();
+      tick();
+    } else {
+      setStatus("Reset failed", "err");
+    }
+  } catch (e) {
+    setStatus("Reset failed: " + e, "err");
+  }
+});
+
+document.getElementById("testBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("testBtn");
+  btn.disabled = true; btn.textContent = "Sending…";
+  try {
+    const r = await fetch("/api/test-webhook", { method: "POST" });
+    const d = await r.json();
+    btn.textContent = d.ok ? "Sent ✓" : "Failed";
+  } catch {
+    btn.textContent = "Failed";
+  }
+  setTimeout(() => { btn.disabled = false; btn.textContent = "Test webhook"; tick(); }, 1500);
+});
+
+loadConfig();
+tick();
+setInterval(tick, 2000);
+</script>
+</body>
+</html>
