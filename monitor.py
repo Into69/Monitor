@@ -451,4 +451,11 @@ async def test_webhook():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("monitor:app", host=config["host"], port=config["port"], reload=False)
+    uvicorn.run(
+        "monitor:app",
+        host=config["host"],
+        port=config["port"],
+        reload=False,
+        log_level="warning",
+        access_log=False,
+    )
