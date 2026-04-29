@@ -276,7 +276,24 @@ async function tick() {
       const plug = document.getElementById("battPlug");
       plug.textContent = b.plugged ? "Plugged in" : "On battery";
       plug.className = "pill " + (b.plugged ? "ok" : (b.percent <= 20 ? "bad" : "warn"));
-      document.getElementById("battTime").textContent = b.time_left ? `~${b.time_left}` : "";
+      const fmtEstimate = (t, suffix) => {
+        if (!t) return "";
+        if (t.seconds === 0) return t.text;
+        if (t.seconds == null) return t.text;
+        return `~${t.text} ${suffix}` + (t.rate_pct_per_min ? ` (${t.rate_pct_per_min}%/min)` : "");
+      };
+      let battTimeText = "";
+      if (b.plugged) {
+        battTimeText = fmtEstimate(b.time_to_full, "to full");
+      } else if (b.time_to_empty) {
+        battTimeText = fmtEstimate(b.time_to_empty, "remaining");
+        // Fall back to psutil's estimate while ours is still warming up.
+        if (b.time_to_empty.seconds == null && b.time_to_empty.text === "estimating…"
+            && b.time_left && b.time_left !== "unknown" && b.time_left !== "unlimited") {
+          battTimeText = `~${b.time_left} remaining`;
+        }
+      }
+      document.getElementById("battTime").textContent = battTimeText;
       const bar = document.getElementById("battBar");
       bar.style.width = b.percent + "%";
       bar.style.background = b.plugged ? "var(--good)" : (b.percent <= 20 ? "var(--bad)" : (b.percent <= 50 ? "var(--warn)" : "var(--good)"));

@@ -156,9 +156,72 @@ state = {
     "last_alerted_high": None,   # highest charge threshold already alerted in current charge cycle
     "last_event": None,
     "events": [],                # rolling list of recent events (newest first)
+    "charge_history": [],        # [(ts, percent)] while plugged in; cleared on unplug
+    "discharge_history": [],     # [(ts, percent)] while on battery; cleared on plug-in
 }
 
 EVENT_LIMIT = 50
+BATTERY_HISTORY_MAX = 30           # keep at most this many samples
+BATTERY_HISTORY_MIN_SECONDS = 60   # need this much spread before estimating
+
+
+def _format_hms(seconds: int) -> str:
+    h, rem = divmod(int(seconds), 3600)
+    m, _ = divmod(rem, 60)
+    if h:
+        return f"{h:d}h {m:02d}m"
+    return f"{m}m"
+
+
+def update_battery_history(b: dict) -> None:
+    """Record a sample into the appropriate history; clear the other on transition."""
+    now = time.time()
+    if b["plugged"]:
+        if state["discharge_history"]:
+            state["discharge_history"].clear()
+        state["charge_history"].append((now, b["percent"]))
+        del state["charge_history"][:-BATTERY_HISTORY_MAX]
+    else:
+        if state["charge_history"]:
+            state["charge_history"].clear()
+        state["discharge_history"].append((now, b["percent"]))
+        del state["discharge_history"][:-BATTERY_HISTORY_MAX]
+
+
+def _estimate_from_history(hist, remaining_pct, stall_text):
+    if len(hist) < 2:
+        return {"text": "estimating…", "seconds": None, "rate_pct_per_min": None}
+    t_old, p_old = hist[0]
+    t_new, p_new = hist[-1]
+    dt = t_new - t_old
+    dp = abs(p_new - p_old)
+    if dt < BATTERY_HISTORY_MIN_SECONDS:
+        return {"text": "estimating…", "seconds": None, "rate_pct_per_min": None}
+    if dp <= 0:
+        return {"text": stall_text, "seconds": None, "rate_pct_per_min": 0.0}
+    rate_per_sec = dp / dt
+    seconds = remaining_pct / rate_per_sec
+    return {
+        "text": _format_hms(seconds),
+        "seconds": int(seconds),
+        "rate_pct_per_min": round(rate_per_sec * 60, 2),
+    }
+
+
+def estimate_time_to_full(percent: float, plugged: bool):
+    if not plugged:
+        return None
+    if percent >= 100:
+        return {"text": "fully charged", "seconds": 0, "rate_pct_per_min": None}
+    return _estimate_from_history(state["charge_history"], 100 - percent, "stalled")
+
+
+def estimate_time_to_empty(percent: float, plugged: bool):
+    if plugged:
+        return None
+    if percent <= 0:
+        return {"text": "depleted", "seconds": 0, "rate_pct_per_min": None}
+    return _estimate_from_history(state["discharge_history"], percent, "stable")
 
 
 def get_battery():
@@ -171,14 +234,16 @@ def get_battery():
     elif secsleft == psutil.POWER_TIME_UNKNOWN or secsleft is None or secsleft < 0:
         time_left = "unknown"
     else:
-        h, rem = divmod(int(secsleft), 3600)
-        m, s = divmod(rem, 60)
-        time_left = f"{h:d}h {m:02d}m"
+        time_left = _format_hms(secsleft)
+    percent = round(b.percent, 1)
+    plugged = bool(b.power_plugged)
     return {
-        "percent": round(b.percent, 1),
-        "plugged": bool(b.power_plugged),
+        "percent": percent,
+        "plugged": plugged,
         "time_left": time_left,
         "secsleft": secsleft if isinstance(secsleft, int) else None,
+        "time_to_full": estimate_time_to_full(percent, plugged),
+        "time_to_empty": estimate_time_to_empty(percent, plugged),
     }
 
 
@@ -321,6 +386,8 @@ async def battery_monitor_loop():
                     first = False
                 await asyncio.sleep(config["poll_interval_seconds"])
                 continue
+
+            update_battery_history(b)
 
             prev_pct = state["last_percent"]
             prev_plugged = state["last_plugged"]
